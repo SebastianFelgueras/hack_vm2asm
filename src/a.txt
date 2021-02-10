@@ -1,0 +1,29 @@
+--------------PUSH----------------
+    local argument 
+        @segment //direccion con base address
+        A=M+i
+        D=M
+        @SP
+        A=M
+        M=D
+        @SP
+        M=M+1
+
+    constant
+        @i
+        D=A
+        @SP
+        A=M
+        M=D
+        @SP
+        M=M+1
+    temp
+        @5
+        A=A+i
+        D=M
+    static
+        @file.numero
+        D=M
+
+         
+
