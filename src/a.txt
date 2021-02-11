@@ -1,7 +1,9 @@
 --------------PUSH----------------
     local argument 
+        @i
+        D=A
         @segment //direccion con base address
-        A=M+i
+        A=M+D
         D=M
         @SP
         A=M
@@ -25,5 +27,64 @@
         @file.numero
         D=M
 
-         
+-----------------POP---------------------
+    local
+        @SP
+        M=M-1
+        A=M
+        @i
+        D=A
+        @segment
+        D=M+D
+        M=D
 
+        @i
+        D=A
+        @segment
+        D=D+M
+        @SP
+        M=M-1
+        A=M
+        A=M
+        A=A+D
+        D=D-A
+        A=A+D
+        D=-D
+        M=D
+    temp
+        @5+i
+        M=D
+
+-------------OPS-------------------
+    add
+        @SP
+        A=M
+        D=M
+        @SP
+        M=M-1
+        A=M
+        M=M+D      
+    not 
+        @SP
+        A=M
+        M=!M   
+
+    eq
+        @SP
+        M=M-1
+        A=M
+        D=M
+        A=A-1
+        D=M-D
+        @ETIQUETAINTERNAINICIAL{}
+        D;JEQ
+        @SP
+        A=M-1
+        M=0
+        @ETIQUETAFINALSALIDA{}
+        0;JMP
+        (ETIQUETAINTERNAINICIAL{})
+        @SP
+        A=M-1
+        M=-1
+        (ETIQUETAFINALSALIDA{})

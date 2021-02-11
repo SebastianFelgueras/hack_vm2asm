@@ -161,13 +161,13 @@ impl PossibleCommands{
             _=>Err(()),
         }
     }
-    pub fn to_asm(&self,file_name:&str)->String{
+    pub fn to_asm(&self,file_name:&str,current_command:usize)->String{
         match self{
             PossibleCommands::Memory(inner)=>{
                 inner.to_asm(file_name)
             },
             PossibleCommands::Arithmetic(inner)=>{
-                inner.to_asm()
+                inner.to_asm(current_command)
             }
         }
     }
@@ -180,7 +180,54 @@ impl MemoryCommand{
     fn to_asm(&self,file_name:&str)->String{
         match self{
             MemoryCommand::Pop(value)=>{
-                String::new()
+                let pop_signature = "@SP\nM=M-1\nA=M\nD=M\n";
+                match value{
+                    MemoryLocation::Constant(_)=>{
+                        panic!("Invalid operation, cannot pop to constant");
+                    },
+                    MemoryLocation::Temp(direccion)=>{
+                        if *direccion > 7{
+                            panic!("Compilation error");
+                        }
+                        return format!("{}@{}\nM=D\n",pop_signature,*direccion+5);
+                    },
+                    MemoryLocation::Static(numero)=>{
+                        return format!("{}@{}.{}\nM=D\n",pop_signature,file_name,numero);
+                    },
+                    MemoryLocation::Pointer(value)=>{
+                        if *value == 0{
+                            return format!("{}@THIS\nM=D\n",pop_signature);
+                        }else if *value == 1{
+                            return format!("{}@THAT\nM=D\n",pop_signature);
+                        }else{
+                            panic!("Compilation error");
+                        }
+                    },
+                    valor=>{
+                        let numero;
+                        let seccion;
+                        match valor{
+                            MemoryLocation::Local(num)=>{
+                                numero = num;
+                                seccion = "LCL";
+                            },
+                            MemoryLocation::This(num)=>{
+                                numero = num;
+                                seccion = "THIS";
+                            },
+                            MemoryLocation::That(num)=>{
+                                numero = num;
+                                seccion = "THAT";
+                            },
+                            MemoryLocation::Argument(num)=>{
+                                numero = num;
+                                seccion = "ARG";
+                            },
+                            _=>unreachable!(),
+                        }
+                        return format!("@{}\nD=A\n@{}\nD=D+M\n@SP\nM=M-1\nA=M\nA=M\nA=A+D\nD=D-A\nA=A+D\nD=-D\nM=D\n",numero,seccion);
+                    }
+                }
             },
             MemoryCommand::Push(value)=>{
                 //una vez que el valor a pushear esta en D, agregar esto
@@ -193,7 +240,7 @@ impl MemoryCommand{
                         if *direccion > 7{
                             panic!("Compilation error");
                         }
-                        return format!("@5\nA=A+{}\nD=M\n{}",direccion,push_signature);
+                        return format!("@{}\nD=M\n{}",direccion+5,push_signature);
                     },
                     MemoryLocation::Static(numero)=>{
                         return format!("@{}.{}\nD=M\n{}",file_name,numero,push_signature);
@@ -229,9 +276,8 @@ impl MemoryCommand{
                             },
                             _=>unreachable!(),
                         }
-                        return format!("@{}\nA=M+{}\nD=M\n{}",seccion,numero,push_signature);
-                    }
-                    
+                        return format!("@{}\nD=A\n@{}\nA=M+D\nD=M\n{}",numero,seccion,push_signature);
+                    }             
                 }
             }
         }
@@ -259,8 +305,40 @@ pub enum ArithmeticCommand{
     Not,
 }
 impl ArithmeticCommand{
-    fn to_asm(&self)->String{
-        todo!();
+    fn to_asm(&self,current_command:usize)->String{
+        let binarias = "@SP\nM=M-1\nA=M\nD=M\n@SP\nA=M-1\nM=M";
+        let unarias = "@SP\nA=M-1\nM=";
+        let condiciones = "@SP\nM=M-1\nA=M\nD=M\nA=A-1\nD=M-D\n@ETIQUETAINTERNAINICIAL*\nD;<\n@SP\nA=M-1\nM=0\n@ETIQUETAFINALSALIDA*\n0;JMP\n(ETIQUETAINTERNAINICIAL*)\n@SP\nA=M-1\nM=-1\n(ETIQUETAFINALSALIDA*)";
+        match self{
+            ArithmeticCommand::Add=>{
+                format!("{}+D\n",binarias)
+            },
+            ArithmeticCommand::Sub=>{
+                format!("{}-D\n",binarias)
+            }
+            ArithmeticCommand::And=>{
+                format!("{}&D\n",binarias)
+            },
+            ArithmeticCommand::Or=>{
+                format!("{}|D\n",binarias)
+            },
+            ArithmeticCommand::Neg=>{
+                format!("{}-M\n",unarias)
+            },
+            ArithmeticCommand::Not=>{
+                format!("{}!M\n",unarias)
+            },
+            ArithmeticCommand::Eq=>{
+                condiciones.replace('*', &current_command.to_string()).replace('<', "JEQ")
+
+            },
+            ArithmeticCommand::Gt=>{
+                condiciones.replace('*', &current_command.to_string()).replace('<', "JGT")
+            },
+            ArithmeticCommand::Lt=>{
+                condiciones.replace('*', &current_command.to_string()).replace('<', "JLT")
+            }
+        }
     }
 }
 pub struct ComandosParseados{

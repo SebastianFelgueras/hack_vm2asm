@@ -1,3 +1,8 @@
+//CONSIDERACIONES CONTRACTUALES Y BUGS
+//el compilador no evita hacer operaciones sobre un stack vacio
+//el compilador no siempre chequea que sea válida la direccion del memory segment a utilizar
+
+//falta testear stack arithmetic
 use std::{
     env,
     process::exit,
@@ -51,8 +56,9 @@ fn main() {
             );
         }
         compilado.push_str(
-            &comando.to_asm(nombre_archivo)
-        )
+            &comando.to_asm(nombre_archivo,i)
+        );
+        i+=1;
     }
     
     if let Err(_) = fs::write(archive.with_extension("asm"),compilado){
