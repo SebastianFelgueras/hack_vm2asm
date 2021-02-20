@@ -2,12 +2,11 @@
 //el compilador no evita hacer operaciones sobre un stack vacio
 //el compilador no siempre chequea que sea válida la direccion del memory segment a utilizar
 
-//falta testear stack arithmetic
 use std::{
     env,
     process::exit,
     fs,
-    path::Path,
+    path,
 };
 mod comandos;
 
@@ -24,11 +23,6 @@ fn main() {
         inv_args!();
     }
     let verboso;
-    let archive = Path::new(&argumentos[0]);
-    let archivo = match fs::read_to_string(archive){
-        Ok(valor)=>valor,
-        Err(_)=>{println!("Error accessing the file");exit(-2)},
-    };
     if argumentos.len() == 2{
         if argumentos[1].trim() == "-v"{
             verboso = true;
@@ -38,30 +32,29 @@ fn main() {
     }else{
         verboso = false;
     }
-    let comandos = match comandos::ComandosParseados::parse_commands(archivo,verboso){
-        Ok(valor)=>valor,
-        Err(_)=>{println!("Compilation error");exit(-6) },
-    };
-    let mut compilado = String::new();
-    let mut i = 0;
-    let nombre_archivo = archive.file_stem().unwrap().to_str().unwrap();
-    for comando in comandos.comandos{
-        if verboso{
-            compilado.push_str(
-                &format!("//{}\n",
-                match comandos.comandos_str{
-                    Some(ref valor)=>&valor[i],
-                    None=>panic!(""),
-                })
-            );
+    let mut compiler = comandos::Compiler::new(verboso);
+    let archive = path::PathBuf::from(&argumentos[0]);
+    if let Err(valor) = compiler.parse(archive.clone()){
+        match valor.compilation_error(){
+            comandos::CompilationError::FileAccessing{file}=>{
+                println!("The compiler was unable to access the file: {}",file.to_str().unwrap());
+                exit(-3);
+            }
+            comandos::CompilationError::SintaxError{line}=>{
+                println!("Sintax error at line {} in file {}",line,valor.file_str());
+                exit(-4);
+            }
+            comandos::CompilationError::UnknownCommand{line}=>{
+                println!("Unknown command at line {} in file {}",line,valor.file_str());
+                exit(-5);
+            }
+            comandos::CompilationError::UnknownMemorySegment{line}=>{
+                println!("Unknown memory segment at line {} in file {}",line,valor.file_str());
+                exit(-6);
+            }
         }
-        compilado.push_str(
-            &comando.to_asm(nombre_archivo,i)
-        );
-        i+=1;
     }
-    
-    if let Err(_) = fs::write(archive.with_extension("asm"),compilado){
+    if let Err(_) = fs::write(archive.with_extension("asm"),compiler.compile()){
         println!("Error writing to the asm file!");
         exit(-9);
     }

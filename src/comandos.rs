@@ -1,15 +1,136 @@
-pub enum PossibleCommands{
+use std::{
+    path,
+    fs,
+};
+pub struct Compiler{
+    comandos: Vec<(String,ComandosParseados)>,
+    compiled_code: Option<String>,
+    verboso: bool,
+    pub booting_code:&'static str,
+}
+impl Compiler{
+    #[inline]
+    pub fn new(verboso:bool)->Self{
+        Compiler{
+            comandos: Vec::new(),
+            compiled_code: None,
+            verboso,
+            booting_code: Compiler::booting_code(),
+        }
+    }
+    #[inline]
+    const fn booting_code()->&'static str{
+        ""
+    }
+    pub fn parse(&mut self,archive:path::PathBuf)->Result<(),CompError>{
+        if archive.is_file(){
+            self.comandos.push(
+                (
+                    archive.file_name().unwrap().to_str().unwrap().to_string(),
+                    match ComandosParseados::parse_commands(
+                        match fs::read_to_string(&archive){
+                            Ok(valor)=>valor,
+                            Err(_)=>return Err(CompError{
+                                compilation_error: CompilationError::FileAccessing{file:archive.clone()},
+                                file: archive,
+                            }),
+                        },
+                        self.verboso 
+                    ){
+                        Ok(valor)=>valor,
+                        Err(valor)=>return Err(CompError{
+                            compilation_error: valor,
+                            file: archive,
+                        }),
+                    }
+                )
+            );
+        }else{
+            for file in archive.read_dir().unwrap(){
+                let file = file.unwrap().path();
+                if file.is_file() && file.extension() == Some(std::ffi::OsStr::new("vm")){
+                    self.comandos.push(
+                        (
+                            file.file_name().unwrap().to_str().unwrap().to_string(),
+                            match ComandosParseados::parse_commands(
+                                    match fs::read_to_string(&file){
+                                        Ok(valor)=>valor,
+                                        Err(_)=>return Err(CompError{
+                                            compilation_error: CompilationError::FileAccessing{file:file.clone()},
+                                            file,
+                                        }),
+                                    },
+                                    self.verboso 
+                                ){
+                                    Ok(valor)=>valor,
+                                    Err(valor)=>return Err(CompError{
+                                        compilation_error: valor,
+                                        file,
+                                    }),
+                                }
+                        )
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn compile(self)->String{
+        let mut compilado = String::new();
+        for (current_file,comandos) in self.comandos{
+            let mut comandos_str: Vec<String> = Vec::new();
+            if self.verboso{
+                comandos_str = comandos.comandos_str.unwrap();
+            }
+            let mut comandos_str = comandos_str.iter();
+            for i in 0..comandos.comandos.len(){
+                if self.verboso{
+                    compilado += &format!("\\{}\n",comandos_str.next().unwrap());
+                }
+                compilado += &comandos.comandos[i].to_asm(&current_file,i);
+                compilado.push('\n');
+            }
+        }
+        compilado
+    }
+}
+pub enum CompilationError{
+    FileAccessing{file: path::PathBuf},
+    UnknownCommand{line:usize},
+    SintaxError{line:usize},
+    UnknownMemorySegment{line:usize},
+}
+pub struct CompError{
+    compilation_error: CompilationError,
+    file: path::PathBuf,
+}
+impl CompError{
+    #[inline]
+    pub fn compilation_error(&self)->&CompilationError{
+        &self.compilation_error
+    }
+    #[inline]
+    pub fn file_str(&self)->&str{
+        self.file.to_str().unwrap()
+    }
+    #[inline]
+    pub fn file(&self)->&path::PathBuf{
+        &self.file
+    }
+}
+enum PossibleCommands{
     Memory(MemoryCommand),
     Arithmetic(ArithmeticCommand),
+    Branching(BranchingCommand),
 }
 impl PossibleCommands{
-    fn parse_command(line:Vec<&str>)->Result<PossibleCommands,()>{
+    fn parse_command(line:Vec<&str>,line_number:usize)->Result<PossibleCommands,CompilationError>{
         match line[0]{
             "pop"=>{
                 Ok(
                     PossibleCommands::Memory(
                         MemoryCommand::Pop(
-                            PossibleCommands::memory_location(&line)?
+                            PossibleCommands::memory_location(&line,line_number)?
                         )
                     )
                 )
@@ -18,7 +139,7 @@ impl PossibleCommands{
                 Ok(
                     PossibleCommands::Memory(
                         MemoryCommand::Push(
-                            PossibleCommands::memory_location(&line)?
+                            PossibleCommands::memory_location(&line,line_number)?
                         )
                     )
                 )
@@ -86,21 +207,33 @@ impl PossibleCommands{
                     )
                 )
             },
-            _=>Err(()),
+            /*"label"=>{
+                Ok(
+                    PossibleCommands::Branching(
+                        BranchingCommand::Label(
+                            LabelData{
+                                function: 
+                                label: 
+                            }
+                        )
+                    )
+                )
+            },*/
+            _=>Err(CompilationError::UnknownCommand{line:line_number}),
         }
     }
     #[inline]
-    fn memory_location(line: &Vec<&str>)->Result<MemoryLocation,()>{
+    fn memory_location(line: &Vec<&str>,line_number:usize)->Result<MemoryLocation,CompilationError>{
         if line.len() != 3{
-            return Err(());
+            return Err(CompilationError::SintaxError{line:line_number});
         }
-        fn parse(num:&str)->Result<i16,()>{
+        let parse = |num:&str|->Result<i16,CompilationError>{
             match num.parse(){
                 Ok(valor)=>Ok(valor),
-                Err(_)=>Err(()),
+                Err(_)=>Err(CompilationError::SintaxError{line:line_number}),
             }
                 
-        }
+        };
         match line[1]{
             "static"=>{
                 Ok(
@@ -158,21 +291,24 @@ impl PossibleCommands{
                     )
                 )
             },
-            _=>Err(()),
+            _=>Err(CompilationError::UnknownMemorySegment{line:line_number}),
         }
     }
-    pub fn to_asm(&self,file_name:&str,current_command:usize)->String{
+    fn to_asm(&self,file_name:&str,current_command:usize)->String{
         match self{
             PossibleCommands::Memory(inner)=>{
                 inner.to_asm(file_name)
             },
             PossibleCommands::Arithmetic(inner)=>{
                 inner.to_asm(current_command)
-            }
+            },
+            PossibleCommands::Branching(inner)=>{
+                inner.to_asm()
+            },
         }
     }
 }
-pub enum MemoryCommand{
+enum MemoryCommand{
     Pop(MemoryLocation),
     Push(MemoryLocation),
 }
@@ -283,7 +419,7 @@ impl MemoryCommand{
         }
     }
 }
-pub enum MemoryLocation{
+enum MemoryLocation{
     Static(i16),
     Constant(i16),
     Local(i16),
@@ -293,7 +429,7 @@ pub enum MemoryLocation{
     This(i16),
     That(i16),
 }
-pub enum ArithmeticCommand{
+enum ArithmeticCommand{
     Add,
     Sub,
     Neg,
@@ -341,15 +477,30 @@ impl ArithmeticCommand{
         }
     }
 }
-pub struct ComandosParseados{
+struct ComandosParseados{
     pub comandos: Vec<PossibleCommands>,
     pub comandos_str: Option<Vec<String>>,
 }
+enum BranchingCommand{
+    Goto(LabelData),
+    IfGoto(LabelData),
+    Label(LabelData),
+}
+impl BranchingCommand{
+    fn to_asm(&self)->String{
+        unimplemented!()
+    }
+}
+struct LabelData{
+    function:String,
+    label:String,
+}
 impl ComandosParseados{
     #[inline]
-    pub fn parse_commands(texto: String,verbose:bool)->Result<ComandosParseados,()>{
+    pub fn parse_commands(texto: String,verbose:bool)->Result<ComandosParseados,CompilationError>{
         let mut comandos = Vec::new();
         let mut comandos_str:Vec<String> = Vec::new();
+        let mut line_number = 1;
         'outer:for line in texto.lines(){
             let line = match strip_command(line){
                 Some(valor)=>valor,
@@ -360,7 +511,8 @@ impl ComandosParseados{
             }
             let line = line.split_whitespace().collect::<Vec<&str>>();
             //Si contiene 0 elementos hay algo que no anda como debería, debe tener al menos 1
-            comandos.push(PossibleCommands::parse_command(line)?);
+            comandos.push(PossibleCommands::parse_command(line,line_number)?);
+            line_number +=1;
         }
         Ok(
             ComandosParseados{
