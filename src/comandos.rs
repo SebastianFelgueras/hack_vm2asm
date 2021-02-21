@@ -1,10 +1,12 @@
+//Las label tienen scope global por ahora
+
 use std::{
     path,
     fs,
+    collections::HashMap,
 };
 pub struct Compiler{
     comandos: Vec<(String,ComandosParseados)>,
-    compiled_code: Option<String>,
     verboso: bool,
     pub booting_code:&'static str,
 }
@@ -13,7 +15,6 @@ impl Compiler{
     pub fn new(verboso:bool)->Self{
         Compiler{
             comandos: Vec::new(),
-            compiled_code: None,
             verboso,
             booting_code: Compiler::booting_code(),
         }
@@ -76,7 +77,7 @@ impl Compiler{
         Ok(())
     }
     pub fn compile(self)->String{
-        let mut compilado = String::new();
+        let mut compilado = String::from(self.booting_code);
         for (current_file,comandos) in self.comandos{
             let mut comandos_str: Vec<String> = Vec::new();
             if self.verboso{
@@ -85,7 +86,7 @@ impl Compiler{
             let mut comandos_str = comandos_str.iter();
             for i in 0..comandos.comandos.len(){
                 if self.verboso{
-                    compilado += &format!("\\{}\n",comandos_str.next().unwrap());
+                    compilado += &format!("//{}\n",comandos_str.next().unwrap());
                 }
                 compilado += &comandos.comandos[i].to_asm(&current_file,i);
                 compilado.push('\n');
@@ -99,6 +100,7 @@ pub enum CompilationError{
     UnknownCommand{line:usize},
     SintaxError{line:usize},
     UnknownMemorySegment{line:usize},
+    UnknownLabel{line:usize},
 }
 pub struct CompError{
     compilation_error: CompilationError,
@@ -124,7 +126,7 @@ enum PossibleCommands{
     Branching(BranchingCommand),
 }
 impl PossibleCommands{
-    fn parse_command(line:Vec<&str>,line_number:usize)->Result<PossibleCommands,CompilationError>{
+    fn parse_command(line:Vec<&str>,line_number:usize,current_function: &mut String,labels_on_scope:&mut HashMap<String,String>)->Result<PossibleCommands,CompilationError>{
         match line[0]{
             "pop"=>{
                 Ok(
@@ -207,22 +209,58 @@ impl PossibleCommands{
                     )
                 )
             },
-            /*"label"=>{
+            "label"=>{
+                let label = match line.get(1){
+                    Some(valor)=>valor,
+                    None=>return Err(CompilationError::SintaxError{line:line_number})
+                };
+                let label_mangled = BranchingCommand::mangle(current_function, line_number,label);
+                labels_on_scope.insert(label.to_string(), label_mangled.clone());
                 Ok(
                     PossibleCommands::Branching(
                         BranchingCommand::Label(
-                            LabelData{
-                                function: 
-                                label: 
-                            }
+                            label_mangled
                         )
                     )
                 )
-            },*/
+            },
+            "if-goto"=>{
+                let label = *match line.get(1){
+                    Some(valor)=>valor,
+                    None=>return Err(CompilationError::SintaxError{line:line_number})
+                };
+                if let Some(mangled) = labels_on_scope.get(label){
+                    Ok(
+                        PossibleCommands::Branching(
+                            BranchingCommand::IfGoto(
+                                mangled.to_string()
+                            )
+                        )
+                    )
+                }else{
+                    Err(CompilationError::UnknownLabel{line:line_number})
+                }
+            },
+            "goto"=>{
+                let label = *match line.get(1){
+                    Some(valor)=>valor,
+                    None=>return Err(CompilationError::SintaxError{line:line_number})
+                };
+                if let Some(mangled) = labels_on_scope.get(label){
+                    Ok(
+                        PossibleCommands::Branching(
+                            BranchingCommand::Goto(
+                                mangled.to_string()
+                            )
+                        )
+                    )
+                }else{
+                    Err(CompilationError::UnknownLabel{line:line_number})
+                }
+            },
             _=>Err(CompilationError::UnknownCommand{line:line_number}),
         }
     }
-    #[inline]
     fn memory_location(line: &Vec<&str>,line_number:usize)->Result<MemoryLocation,CompilationError>{
         if line.len() != 3{
             return Err(CompilationError::SintaxError{line:line_number});
@@ -361,13 +399,13 @@ impl MemoryCommand{
                             },
                             _=>unreachable!(),
                         }
-                        return format!("@{}\nD=A\n@{}\nD=D+M\n@SP\nM=M-1\nA=M\nA=M\nA=A+D\nD=D-A\nA=A+D\nD=-D\nM=D\n",numero,seccion);
+                        return format!("@{}\nD=A\n@{}\nD=D+M\n@SP\nM=M-1\nA=M\nA=M\nA=A+D\nD=D-A\nA=A+D\nD=-D\nM=D",numero,seccion);
                     }
                 }
             },
             MemoryCommand::Push(value)=>{
                 //una vez que el valor a pushear esta en D, agregar esto
-                let push_signature = "@SP\nA=M\nM=D\n@SP\nM=M+1\n";
+                let push_signature = "@SP\nA=M\nM=D\n@SP\nM=M+1";
                 match value{
                     MemoryLocation::Constant(constante)=>{
                         return format!("@{}\nD=A\n{}",constante,push_signature)
@@ -447,22 +485,22 @@ impl ArithmeticCommand{
         let condiciones = "@SP\nM=M-1\nA=M\nD=M\nA=A-1\nD=M-D\n@ETIQUETAINTERNAINICIAL*\nD;<\n@SP\nA=M-1\nM=0\n@ETIQUETAFINALSALIDA*\n0;JMP\n(ETIQUETAINTERNAINICIAL*)\n@SP\nA=M-1\nM=-1\n(ETIQUETAFINALSALIDA*)";
         match self{
             ArithmeticCommand::Add=>{
-                format!("{}+D\n",binarias)
+                format!("{}+D",binarias)
             },
             ArithmeticCommand::Sub=>{
-                format!("{}-D\n",binarias)
+                format!("{}-D",binarias)
             }
             ArithmeticCommand::And=>{
-                format!("{}&D\n",binarias)
+                format!("{}&D",binarias)
             },
             ArithmeticCommand::Or=>{
-                format!("{}|D\n",binarias)
+                format!("{}|D",binarias)
             },
             ArithmeticCommand::Neg=>{
-                format!("{}-M\n",unarias)
+                format!("{}-M",unarias)
             },
             ArithmeticCommand::Not=>{
-                format!("{}!M\n",unarias)
+                format!("{}!M",unarias)
             },
             ArithmeticCommand::Eq=>{
                 condiciones.replace('*', &current_command.to_string()).replace('<', "JEQ")
@@ -482,36 +520,46 @@ struct ComandosParseados{
     pub comandos_str: Option<Vec<String>>,
 }
 enum BranchingCommand{
-    Goto(LabelData),
-    IfGoto(LabelData),
-    Label(LabelData),
+    Goto(String),
+    IfGoto(String),
+    Label(String),
 }
 impl BranchingCommand{
     fn to_asm(&self)->String{
-        unimplemented!()
+        match self{
+            BranchingCommand::Goto(label)=>{
+                format!("@{}\n0;JMP",label)
+            },
+            BranchingCommand::IfGoto(label)=>{
+                format!("@SP\nM=M-1\nA=M\nD=M\n@{}\nD;JNE",label)
+            },
+            BranchingCommand::Label(label)=>{
+                format!("({})",label)
+            }
+        }
+    }
+    fn mangle(current_function:&str,current_line:usize,label:&str)->String{
+        format!("{}:{}:{}",current_function,label,current_line)
     }
 }
-struct LabelData{
-    function:String,
-    label:String,
-}
 impl ComandosParseados{
-    #[inline]
     pub fn parse_commands(texto: String,verbose:bool)->Result<ComandosParseados,CompilationError>{
         let mut comandos = Vec::new();
         let mut comandos_str:Vec<String> = Vec::new();
         let mut line_number = 1;
+        let mut current_function = String::new();
+        let mut labels_on_scope = ComandosParseados::label_parser(&texto);
         'outer:for line in texto.lines(){
             let line = match strip_command(line){
                 Some(valor)=>valor,
-                None=>continue 'outer,
+                None=>{line_number+=1;continue 'outer},
             };
             if verbose{
                 comandos_str.push(line.to_string());
             }
             let line = line.split_whitespace().collect::<Vec<&str>>();
             //Si contiene 0 elementos hay algo que no anda como debería, debe tener al menos 1
-            comandos.push(PossibleCommands::parse_command(line,line_number)?);
+            comandos.push(PossibleCommands::parse_command(line,line_number,&mut current_function,&mut labels_on_scope)?);
             line_number +=1;
         }
         Ok(
@@ -524,8 +572,21 @@ impl ComandosParseados{
             }
         )
     }
+    fn label_parser(texto:&String)->HashMap<String,String>{
+        let mut mapa = HashMap::new();
+        let mut i = 1;
+        for line in texto.lines(){
+            if let Some(valor) = strip_command(line){
+                let valor = valor.split_whitespace().collect::<Vec<&str>>();
+                if valor[0] =="label"{
+                    mapa.insert(valor[1].to_string(),BranchingCommand::mangle("",i, valor[1]));
+                }
+            }
+            i+=1;
+        }
+        mapa
+    }
 }
-#[inline]
 fn strip_command(mut line:&str)->Option<&str>{
     line = line.trim();
     if line.starts_with("//"){

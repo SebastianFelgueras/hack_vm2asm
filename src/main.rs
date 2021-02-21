@@ -52,6 +52,10 @@ fn main() {
                 println!("Unknown memory segment at line {} in file {}",line,valor.file_str());
                 exit(-6);
             }
+            comandos::CompilationError::UnknownLabel{line}=>{
+                println!("Unknown label at line {} in file {}",line,valor.file_str());
+                exit(-7);
+            }
         }
     }
     if let Err(_) = fs::write(archive.with_extension("asm"),compiler.compile()){
