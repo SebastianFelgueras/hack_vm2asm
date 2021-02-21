@@ -115,10 +115,6 @@ impl CompError{
     pub fn file_str(&self)->&str{
         self.file.to_str().unwrap()
     }
-    #[inline]
-    pub fn file(&self)->&path::PathBuf{
-        &self.file
-    }
 }
 enum PossibleCommands{
     Memory(MemoryCommand),
