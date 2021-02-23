@@ -1,7 +1,7 @@
 //CONSIDERACIONES CONTRACTUALES Y BUGS
 //el compilador no evita hacer operaciones sobre un stack vacio
 //el compilador no siempre chequea que sea válida la direccion del memory segment a utilizar
-
+//el compilador asume que no se usa multithreading, sino puede haber problemas al parsear funciones
 use std::{
     env,
     process::exit,
@@ -9,8 +9,6 @@ use std::{
     path,
 };
 mod comandos;
-
-const STACK_BASE_ADDRESS:usize = 256; //Posicion del comienzo del stack
 macro_rules! inv_args {
     () => {
         println!("Invalid arguments. First argument should be the name of the file to translate and the second (and optional) is \"-v\" if you want the translated commands to be present in the .asm file as comments");
@@ -33,7 +31,7 @@ fn main() {
         verboso = false;
     }
     let mut compiler = comandos::Compiler::new(verboso);
-    let archive = path::PathBuf::from(&argumentos[0]);
+    let mut archive = path::PathBuf::from(&argumentos[0]);
     if let Err(valor) = compiler.parse(archive.clone()){
         match valor.compilation_error(){
             comandos::CompilationError::FileAccessing{file}=>{
@@ -58,6 +56,7 @@ fn main() {
             }
         }
     }
+    archive.push(archive.file_name().unwrap().to_owned());
     if let Err(_) = fs::write(archive.with_extension("asm"),compiler.compile()){
         println!("Error writing to the asm file!");
         exit(-9);
