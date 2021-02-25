@@ -1,7 +1,9 @@
 //CONSIDERACIONES CONTRACTUALES Y BUGS
 //el compilador no evita hacer operaciones sobre un stack vacio
 //el compilador no siempre chequea que sea válida la direccion del memory segment a utilizar
-//el compilador asume que no se usa multithreading, sino puede haber problemas al parsear funciones
+//el compilador asume que no se usa multithreading (de hecho no lo soporta), sino puede haber problemas al parsear funciones
+//En algunos casos limite puede haber problemas con las labels ya que una vez que se declara una funcion no siempre es claro donde termina,
+//que aparezca un return no quiere decir que termine, puede ser un return dentro de un condicional
 use std::{
     env,
     process::exit,
@@ -17,21 +19,19 @@ macro_rules! inv_args {
 }
 fn main() {
     let argumentos = env::args().skip(1).collect::<Vec<String>>();
-    if argumentos.len() == 0 || argumentos.len() > 2{
+    if argumentos.len() == 0 || argumentos.len() > 3{
         inv_args!();
     }
-    let verboso;
-    if argumentos.len() == 2{
-        if argumentos[1].trim() == "-v"{
-            verboso = true;
-        }else{
-            inv_args!();
-        }
-    }else{
-        verboso = false;
+    let verboso = argumentos.contains(&"-v".to_string());
+    if verboso{
+        println!("Verbose output to file!")
     }
     let mut compiler = comandos::Compiler::new(verboso);
     let mut archive = path::PathBuf::from(&argumentos[0]);
+    if argumentos.contains(&"-bo".to_string()){
+        compiler.disable_booting_code();
+        println!("Booting code disabled!");
+    }
     if let Err(valor) = compiler.parse(archive.clone()){
         match valor.compilation_error(){
             comandos::CompilationError::FileAccessing{file}=>{
@@ -50,10 +50,10 @@ fn main() {
                 println!("Unknown memory segment at line {} in file {}",line,valor.file_str());
                 exit(-6);
             }
-            comandos::CompilationError::UnknownLabel{line}=>{
+            /*comandos::CompilationError::UnknownLabel{line}=>{
                 println!("Unknown label at line {} in file {}",line,valor.file_str());
                 exit(-7);
-            }
+            }*/
         }
     }
     archive.push(archive.file_name().unwrap().to_owned());

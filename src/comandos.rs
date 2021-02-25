@@ -1,14 +1,12 @@
-//Las label tienen scope global por ahora
 static mut CALLID:usize = 0;
 use std::{
     path,
     fs,
-    collections::HashMap,
 };
 pub struct Compiler{
     comandos: Vec<(String,ComandosParseados)>,
     verboso: bool,
-    pub booting_code:String,
+    booting_code:String,
 }
 impl Compiler{
     #[inline]
@@ -19,10 +17,13 @@ impl Compiler{
             booting_code: Compiler::booting_code(),
         }
     }
+    pub fn disable_booting_code(&mut self){
+        self.booting_code = String::new();
+    }
     #[inline]
     fn booting_code()->String{
         format!("@256\nD=A\n@SP\nM=D\n{}\n",
-        PossibleCommands::parse_command(vec!["call","Sys.init","0"],0,&HashMap::new()).unwrap().to_asm("",0))
+        PossibleCommands::parse_command(vec!["call","Sys.init","0"],&mut String::new(),0).unwrap().to_asm("",0))
     }
     pub fn parse(&mut self,archive:path::PathBuf)->Result<(),CompError>{
         if archive.is_file(){
@@ -102,7 +103,6 @@ pub enum CompilationError{
     UnknownCommand{line:usize},
     SintaxError{line:usize},
     UnknownMemorySegment{line:usize},
-    UnknownLabel{line:usize},
 }
 pub struct CompError{
     compilation_error: CompilationError,
@@ -125,7 +125,7 @@ enum PossibleCommands{
     Functions(FunctionCommand),
 }
 impl PossibleCommands{
-    fn parse_command(line:Vec<&str>,line_number:usize,labels_on_scope:&HashMap<String,String>)->Result<PossibleCommands,CompilationError>{
+    fn parse_command(line:Vec<&str>,current_function:&mut String,line_number:usize)->Result<PossibleCommands,CompilationError>{
         match line[0]{
             "pop"=>{
                 Ok(
@@ -213,14 +213,11 @@ impl PossibleCommands{
                     Some(valor)=>valor,
                     None=>return Err(CompilationError::SintaxError{line:line_number})
                 };
-                let label_mangled = match labels_on_scope.get(*label){
-                    Some(v)=>v,
-                    None=>return Err(CompilationError::UnknownLabel{line:line_number})
-                };
+                let label = BranchingCommand::mangle(current_function, label);
                 Ok(
                     PossibleCommands::Branching(
                         BranchingCommand::Label(
-                            label_mangled.clone()
+                            label
                         )
                     )
                 )
@@ -230,40 +227,32 @@ impl PossibleCommands{
                     Some(valor)=>valor,
                     None=>return Err(CompilationError::SintaxError{line:line_number})
                 };
-                if let Some(mangled) = labels_on_scope.get(label){
-                    Ok(
-                        PossibleCommands::Branching(
-                            BranchingCommand::IfGoto(
-                                mangled.to_string()
-                            )
-                        )
+                let label = BranchingCommand::mangle(current_function, label);
+                Ok(
+                    PossibleCommands::Branching(
+                        BranchingCommand::IfGoto(label)
                     )
-                }else{
-                    Err(CompilationError::UnknownLabel{line:line_number})
-                }
+                )
             },
             "goto"=>{
                 let label = *match line.get(1){
                     Some(valor)=>valor,
                     None=>return Err(CompilationError::SintaxError{line:line_number})
                 };
-                if let Some(mangled) = labels_on_scope.get(label){
-                    Ok(
-                        PossibleCommands::Branching(
-                            BranchingCommand::Goto(
-                                mangled.to_string()
-                            )
-                        )
+                let label = BranchingCommand::mangle(current_function, label);
+                Ok(
+                    PossibleCommands::Branching(
+                        BranchingCommand::Goto(label)
                     )
-                }else{
-                    Err(CompilationError::UnknownLabel{line:line_number})
-                }
+                )
             },
             "function"=>{
                 let name = match line.get(1){
                     Some(value)=>value.to_string(),
                     None=>return Err(CompilationError::SintaxError{line:line_number})
                 };
+                current_function.clear();
+                current_function.push_str(&name);
                 Ok(
                     PossibleCommands::Functions(
                         FunctionCommand::Function{
@@ -614,7 +603,7 @@ impl FunctionCommand{
                 ,label=callid,nmas5=n_args+5,funcion_nombre=name)
             },
             FunctionCommand::Return=>{
-                format!("@LCL\nD=M\n@R13\nM=D\n@5\nD=D-A\n@R14\nM=D\n@SP\nA=M-1\nD=M\n@ARG\nA=M\nM=D\n@ARG\nD=M+1\n@SP\nM=D\n@R13\nM=M-1\nA=M\nD=M\n@THAT\nM=D\n@R13\nM=M-1\nA=M\nD=M\n@THIS\nM=D\n@R13\nM=M-1\nA=M\nD=M\n@ARG\nM=D\n@R13\nM=M-1\nA=M\nD=M\n@LCL\nM=D\n@R14\nA=M\n0;JMP")
+                format!("@LCL\nD=M\n@R15\nM=D\n@5\nD=D-A\nA=D\nD=M\n@R14\nM=D\n@SP\nA=M-1\nD=M\n@ARG\nA=M\nM=D\n@ARG\nD=M+1\n@SP\nM=D\n@R15\nM=M-1\nA=M\nD=M\n@THAT\nM=D\n@R15\nM=M-1\nA=M\nD=M\n@THIS\nM=D\n@R15\nM=M-1\nA=M\nD=M\n@ARG\nM=D\n@R15\nM=M-1\nA=M\nD=M\n@LCL\nM=D\n@R14\nA=M\n0;JMP")
             }
         }
         
@@ -625,7 +614,7 @@ impl ComandosParseados{
         let mut comandos = Vec::new();
         let mut comandos_str:Vec<String> = Vec::new();
         let mut line_number = 1;
-        let mut labels_on_scope = ComandosParseados::label_parser(&texto)?;
+        let mut current_function = String::new();
         'outer:for line in texto.lines(){
             let line = match strip_command(line){
                 Some(valor)=>valor,
@@ -636,7 +625,7 @@ impl ComandosParseados{
             }
             let line = line.split_whitespace().collect::<Vec<&str>>();
             //Si contiene 0 elementos hay algo que no anda como debería, debe tener al menos 1
-            comandos.push(PossibleCommands::parse_command(line,line_number,&mut labels_on_scope)?);
+            comandos.push(PossibleCommands::parse_command(line,&mut current_function,line_number)?);
             line_number +=1;
         }
         Ok(
@@ -649,7 +638,7 @@ impl ComandosParseados{
             }
         )
     }
-    ///Asume que el mangling de las labels hace que sean privadas
+    /*///Asume que el mangling de las labels hace que sean privadas
     fn label_parser(texto:&String)->Result<HashMap<String,String>,CompilationError>{
         let mut mapa = HashMap::new();
         let mut current_function = "";
@@ -671,7 +660,7 @@ impl ComandosParseados{
             }
         }
         Ok(mapa)
-    }
+    }*/
 }
 fn strip_command(mut line:&str)->Option<&str>{
     line = line.trim();

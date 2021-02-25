@@ -99,8 +99,6 @@ Branching
         M;JNQ
 
 Functions
-    function
-
     call
         //guardando punteros
 
@@ -151,7 +149,7 @@ Functions
         @funcion_nombre
         0;JMP
         (label)
-    function //no adelantar 
+    function
         ({funcName})
         @{NLocals}
         D=A
@@ -170,11 +168,13 @@ Functions
     return
         @LCL
         D=M
-        @R13
+        @R15 //LCL A.K.A FRAME
         M=D
         @5
         D=D-A
-        @R14
+        A=D
+        D=M
+        @R14 //return A.K.A RET
         M=D
         @SP
         A=M-1
@@ -186,25 +186,25 @@ Functions
         D=M+1
         @SP
         M=D
-        @R13
+        @R15
         M=M-1
         A=M
         D=M
         @THAT
         M=D
-        @R13
+        @R15
         M=M-1
         A=M
         D=M
         @THIS
         M=D
-        @R13
+        @R15
         M=M-1
         A=M
         D=M
         @ARG
         M=D
-        @R13
+        @R15
         M=M-1
         A=M
         D=M
